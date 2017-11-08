@@ -106,7 +106,7 @@ bsdlinfo *parse_extract_values(char *bsdlfilename)
 	  entityname = strdup(token);
 	  if(entityname != NULL) 
 	    {
-	      debug("Found entity \'%s\'\n", entityname);
+	      printf("Found entity \'%s\'\n", entityname);
 	    }
 	} else {
 	  printf("Parse error near ENTITY token in file %s\n", bsdlfilename);
@@ -308,7 +308,7 @@ bsdlinfo *parse_extract_values(char *bsdlfilename)
 	    if(tmpbuf[i] == '1') idcode |= 0x1<<(31-i);
 	    else if(toupper(tmpbuf[i]) == 'X') idcode_mask &= ~(0x1<<(31-i)); 
 	  }
-	  debug("Found IDCODE 0x%08X (%s), mask is 0x%08X\n", idcode, tmpbuf, idcode_mask);
+	  printf("Found IDCODE 0x%08X (%s), mask is 0x%08X\n", idcode, tmpbuf, idcode_mask);
 	  found_idcode = 1;
 
 	}  // end if IDCODE_REGISTER

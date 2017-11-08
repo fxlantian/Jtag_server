@@ -5,7 +5,7 @@
 #define DC_SIZE           4
 #define DC_STATUS_SIZE    4
 
-#define DC_WISHBONE       0
+#define DC_AXI       0
 #define DC_CPU0           1
 #define DC_CPU1           2
 

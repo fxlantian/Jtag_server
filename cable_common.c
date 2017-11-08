@@ -144,6 +144,7 @@ void cable_print_help()
 // Cable API Functions
 
 int cable_write_stream(uint32_t *stream, int len_bits, int set_last_bit) {
+ // printf("stream is %x len_bits is %x set_last_bit is %x\n",stream[0],len_bits,set_last_bit);
   return jtag_cable_in_use->stream_out_func(stream, len_bits, set_last_bit);
 }
 

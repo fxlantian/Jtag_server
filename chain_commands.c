@@ -339,7 +339,7 @@ int jtag_read_write_stream(uint32_t *out_data, uint32_t *in_data, int length_bit
 // When IDCODE is not supported, IR length of the target device must be entered on the command line.
 
 #define ALLOC_SIZE 64
-#define MAX_DEVICES 1024
+#define MAX_DEVICES 1
 int jtag_enumerate_chain(uint32_t **id_array, int *num_devices)
 {
   uint32_t invalid_code = 0x7f;  // Shift this out, we know we're done when we get it back
@@ -366,12 +366,13 @@ int jtag_enumerate_chain(uint32_t **id_array, int *num_devices)
   err |= jtag_write_bit(0); /* SHIFT_DR */
 
   printf("Enumerating JTAG chain...\n");
+  printf("htt_debug Enumerating JTAG chain...\n");
 
   // Putting a limit on the # of devices supported has the useful side effect
   // of insuring we still exit in error cases (we never get the 0x7f manuf. id)
   while(devindex < MAX_DEVICES) {
     // get 1 bit. 0 = BYPASS, 1 = start of IDCODE
-    err |= jtag_read_write_bit(invalid_code&0x01, &start_bit);
+    err |= jtag_read_write_bit(invalid_code&0x11, &start_bit);
     invalid_code >>= 1;
 
     if(start_bit == 0) {
