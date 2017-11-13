@@ -13,7 +13,7 @@ DPI](https://github.com/ethz-iis/jtag_dpi), FPGA emulation and FTDI cables.
 Run the following commands to the build the JTAG server:
 
     ./autogen.sh
-    ./configure
+    ./configure --enable-usb-cables=yes --enable-fdti-cables=yes
     make
 
 ## Usage Example
