@@ -34,18 +34,18 @@ with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 /* Definition of OR1K exceptions */
 #define EXCEPT_NONE     0x0000
-#define EXCEPT_RESET	0x0100
+#define EXCEPT_RESET	0x0080
 #define EXCEPT_BUSERR	0x0200
 #define EXCEPT_DPF	0x0300
 #define EXCEPT_IPF	0x0400
 #define EXCEPT_TICK	0x0500
 #define EXCEPT_ALIGN	0x0600
-#define EXCEPT_ILLEGAL	0x0700
+#define EXCEPT_ILLEGAL	0x0084
 #define EXCEPT_INT	0x0800
 #define EXCEPT_DTLBMISS	0x0900
 #define EXCEPT_ITLBMISS	0x0a00
 #define EXCEPT_RANGE	0x0b00
-#define EXCEPT_SYSCALL	0x0c00
+#define EXCEPT_SYSCALL	0x0088
 #define EXCEPT_FPE	0x0d00
 #define EXCEPT_TRAP	0x0e00
 

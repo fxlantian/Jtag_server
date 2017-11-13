@@ -46,23 +46,26 @@
 pthread_mutex_t dbg_access_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* read a word from wishbone */
-int dbg_wb_read32(uint32_t adr, uint32_t *data) {
+int dbg_axi_read32(uint32_t adr, uint32_t *data) {
   int err;
   pthread_mutex_lock(&dbg_access_mutex);
-
+  
   if(DEBUG_HARDWARE == DBG_HW_ADVANCED)
     {
-      if ((err = adbg_select_module(DC_WISHBONE)))
+      
+      if ((err = adbg_select_module(DC_AXI)))
 	{
 	  cable_flush();
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_read(4, 1, adr, (void *)data); // All WB reads / writes are bursts
+      err = adbg_axi_burst_read(4, 1, adr, (void *)data); // All WB reads / writes are bursts
+      
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {
-      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_WISHBONE)))
+      
+      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_AXI)))
 	if (APP_ERR_NONE == (err = legacy_dbg_command(0x6, adr, 4)))
 	  err = legacy_dbg_go((unsigned char*)data, 4, 1);
       *data = ntohl(*data);
@@ -73,24 +76,24 @@ int dbg_wb_read32(uint32_t adr, uint32_t *data) {
 }
 
 /* write a word to wishbone */
-int dbg_wb_write32(uint32_t adr, uint32_t data) {
+int dbg_axi_write32(uint32_t adr, uint32_t data) {
   int err;
   pthread_mutex_lock(&dbg_access_mutex);
 
   if(DEBUG_HARDWARE == DBG_HW_ADVANCED)
     {
-      if ((err = adbg_select_module(DC_WISHBONE)))
+      if ((err = adbg_select_module(DC_AXI)))
 	{
 	  cable_flush();
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_write((void *)&data, 4, 1, adr);
+      err = adbg_axi_burst_write((void *)&data, 4, 1, adr);
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {
       data = ntohl(data);
-      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_WISHBONE)))
+      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_AXI)))
 	if (APP_ERR_NONE == (err = legacy_dbg_command(0x2, adr, 4)))
 	  err = legacy_dbg_go((unsigned char*)&data, 4, 0);  
     }
@@ -101,24 +104,24 @@ int dbg_wb_write32(uint32_t adr, uint32_t data) {
 
 // write a word to wishbone
 // Never actually called from the GDB interface
-int dbg_wb_write16(uint32_t adr, uint16_t data) {
+int dbg_axi_write16(uint32_t adr, uint16_t data) {
   int err;
   pthread_mutex_lock(&dbg_access_mutex);
 
   if(DEBUG_HARDWARE == DBG_HW_ADVANCED)
     {
-      if ((err = adbg_select_module(DC_WISHBONE)))
+      if ((err = adbg_select_module(DC_AXI)))
 	{
 	  cable_flush();
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}  
-      err = adbg_wb_burst_write((void *)&data, 2, 1, adr);
+      err = adbg_axi_burst_write((void *)&data, 2, 1, adr);
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {
         data = ntohs(data);
-	if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_WISHBONE)))
+	if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_AXI)))
 	  if (APP_ERR_NONE == (err = legacy_dbg_command(0x1, adr, 2)))
 	    err = legacy_dbg_go((unsigned char*)&data, 2, 0);
     }
@@ -129,23 +132,23 @@ int dbg_wb_write16(uint32_t adr, uint16_t data) {
 
 // write a word to wishbone
 // Never actually called from the GDB interface
-int dbg_wb_write8(uint32_t adr, uint8_t data) {
+int dbg_axi_write8(uint32_t adr, uint8_t data) {
   int err;
   pthread_mutex_lock(&dbg_access_mutex);
 
   if(DEBUG_HARDWARE == DBG_HW_ADVANCED)
     {
-      if ((err = adbg_select_module(DC_WISHBONE)))
+      if ((err = adbg_select_module(DC_AXI)))
 	{
 	  cable_flush();
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_write((void *)&data, 1, 1, adr);
+      err = adbg_axi_burst_write((void *)&data, 1, 1, adr);
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {
-        if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_WISHBONE)))
+        if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_AXI)))
 	  if (APP_ERR_NONE == (err = legacy_dbg_command(0x0, adr, 1)))
 	    err = legacy_dbg_go((unsigned char*)&data, 1, 0);
     }
@@ -155,7 +158,7 @@ int dbg_wb_write8(uint32_t adr, uint8_t data) {
 }
 
 
-int dbg_wb_read_block32(uint32_t adr, uint32_t *data, int len) {
+int dbg_axi_read_block32(uint32_t adr, uint32_t *data, int len) {
   int err;
 
   if(!len)
@@ -164,19 +167,19 @@ int dbg_wb_read_block32(uint32_t adr, uint32_t *data, int len) {
   pthread_mutex_lock(&dbg_access_mutex);
   if(DEBUG_HARDWARE == DBG_HW_ADVANCED)
     {
-      if ((err = adbg_select_module(DC_WISHBONE)))
+      if ((err = adbg_select_module(DC_AXI)))
 	{
 	  cable_flush();
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_read(4, len, adr, (void *)data);  // 'len' is words.
+      err = adbg_axi_burst_read(4, len, adr, (void *)data);  // 'len' is words.
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {
       int i;
       int bytelen = len<<2;
-      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_WISHBONE)))
+      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_AXI)))
 	if (APP_ERR_NONE == (err = legacy_dbg_command(0x6, adr, bytelen)))
 	  if (APP_ERR_NONE == (err = legacy_dbg_go((unsigned char*)data, bytelen, 1))) // 'len' is words, call wants bytes
 	    for (i = 0; i < len; i ++) data[i] = ntohl(data[i]);   
@@ -188,7 +191,7 @@ int dbg_wb_read_block32(uint32_t adr, uint32_t *data, int len) {
 
 
 // Never actually called from the GDB interface
-int dbg_wb_read_block16(uint32_t adr, uint16_t *data, int len) {
+int dbg_axi_read_block16(uint32_t adr, uint16_t *data, int len) {
   int err;
 
   if(!len)
@@ -197,19 +200,19 @@ int dbg_wb_read_block16(uint32_t adr, uint16_t *data, int len) {
   pthread_mutex_lock(&dbg_access_mutex);
   if(DEBUG_HARDWARE == DBG_HW_ADVANCED)
     {
-      if ((err = adbg_select_module(DC_WISHBONE)))
+      if ((err = adbg_select_module(DC_AXI)))
 	{
 	  cable_flush();
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_read(2, len, adr, (void *)data);  // 'len' is 16-bit halfwords
+      err = adbg_axi_burst_read(2, len, adr, (void *)data);  // 'len' is 16-bit halfwords
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {
       int i;
       int bytelen = len<<1;
-      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_WISHBONE)))
+      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_AXI)))
 	if (APP_ERR_NONE == (err = legacy_dbg_command(0x5, adr, bytelen)))
 	  if (APP_ERR_NONE == (err = legacy_dbg_go((unsigned char*)data, bytelen, 1)))  // 'len' is halfwords, call wants bytes
 	    for (i = 0; i < len; i ++) data[i] = ntohs(data[i]); 
@@ -220,7 +223,7 @@ int dbg_wb_read_block16(uint32_t adr, uint16_t *data, int len) {
 }
 
 // Never actually called from the GDB interface
-int dbg_wb_read_block8(uint32_t adr, uint8_t *data, int len) {
+int dbg_axi_read_block8(uint32_t adr, uint8_t *data, int len) {
   int err;
 
   if(!len)
@@ -229,17 +232,17 @@ int dbg_wb_read_block8(uint32_t adr, uint8_t *data, int len) {
   pthread_mutex_lock(&dbg_access_mutex);
   if(DEBUG_HARDWARE == DBG_HW_ADVANCED)
     {
-      if ((err = adbg_select_module(DC_WISHBONE)))
+      if ((err = adbg_select_module(DC_AXI)))
 	{
 	  cable_flush();
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_read(1, len, adr, (void *)data);  // *** is 'len' bits or words?? Call wants words...
+      err = adbg_axi_burst_read(1, len, adr, (void *)data);  // *** is 'len' bits or words?? Call wants words...
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {
-      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_WISHBONE)))
+      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_AXI)))
 	if (APP_ERR_NONE == (err = legacy_dbg_command(0x4, adr, len)))
 	  err = legacy_dbg_go((unsigned char*)data, len, 1);
     }
@@ -250,7 +253,7 @@ int dbg_wb_read_block8(uint32_t adr, uint8_t *data, int len) {
 
 
 // write a block to wishbone 
-int dbg_wb_write_block32(uint32_t adr, uint32_t *data, int len) {
+int dbg_axi_write_block32(uint32_t adr, uint32_t *data, int len) {
   int err;
 
   if(!len)
@@ -259,20 +262,20 @@ int dbg_wb_write_block32(uint32_t adr, uint32_t *data, int len) {
   pthread_mutex_lock(&dbg_access_mutex);
   if(DEBUG_HARDWARE == DBG_HW_ADVANCED)
     {
-      if ((err = adbg_select_module(DC_WISHBONE)))
+      if ((err = adbg_select_module(DC_AXI)))
 	{
 	  cable_flush();
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_write((void *)data, 4, len, adr);  // 'len' is words.
+      err = adbg_axi_burst_write((void *)data, 4, len, adr);  // 'len' is words.
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {
       int i;
       int bytelen = len << 2;
       for (i = 0; i < len; i ++) data[i] = ntohl(data[i]);
-      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_WISHBONE)))
+      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_AXI)))
 	if (APP_ERR_NONE == (err = legacy_dbg_command(0x2, adr, bytelen)))
 	  err = legacy_dbg_go((unsigned char*)data, bytelen, 0);  // 'len' is words, call wants bytes 
     }
@@ -284,7 +287,7 @@ int dbg_wb_write_block32(uint32_t adr, uint32_t *data, int len) {
 
 // write a block to wishbone
 // Never actually called from the GDB interface
-int dbg_wb_write_block16(uint32_t adr, uint16_t *data, int len) {
+int dbg_axi_write_block16(uint32_t adr, uint16_t *data, int len) {
   int err;
 
   if(!len)
@@ -293,20 +296,20 @@ int dbg_wb_write_block16(uint32_t adr, uint16_t *data, int len) {
   pthread_mutex_lock(&dbg_access_mutex);
   if(DEBUG_HARDWARE == DBG_HW_ADVANCED)
     {
-      if ((err = adbg_select_module(DC_WISHBONE)))
+      if ((err = adbg_select_module(DC_AXI)))
 	{
 	  cable_flush();
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_write((void *)data, 2, len, adr);  // 'len' is (half)words
+      err = adbg_axi_burst_write((void *)data, 2, len, adr);  // 'len' is (half)words
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {
       int i;
       int bytelen = len<<1;
       for (i = 0; i < len; i ++) data[i] = ntohs(data[i]);
-      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_WISHBONE)))
+      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_AXI)))
 	if (APP_ERR_NONE == (err = legacy_dbg_command(0x1, adr, bytelen)))
 	  err = legacy_dbg_go((unsigned char*)data, bytelen, 0);  // 'len' is 16-bit halfwords, call wants bytes  
     }
@@ -316,7 +319,7 @@ int dbg_wb_write_block16(uint32_t adr, uint16_t *data, int len) {
 }
 
 // write a block to wishbone
-int dbg_wb_write_block8(uint32_t adr, uint8_t *data, int len) {
+int dbg_axi_write_block8(uint32_t adr, uint8_t *data, int len) {
   int err;
 
   if(!len)
@@ -325,17 +328,17 @@ int dbg_wb_write_block8(uint32_t adr, uint8_t *data, int len) {
   pthread_mutex_lock(&dbg_access_mutex);
   if(DEBUG_HARDWARE == DBG_HW_ADVANCED)
     {
-      if ((err = adbg_select_module(DC_WISHBONE)))
+      if ((err = adbg_select_module(DC_AXI)))
 	{
 	  cable_flush();
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_write((void *)data, 1, len, adr);  // 'len' is in words...
+      err = adbg_axi_burst_write((void *)data, 1, len, adr);  // 'len' is in words...
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {
-      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_WISHBONE)))
+      if (APP_ERR_NONE == (err = legacy_dbg_set_chain(DC_AXI)))
 	if (APP_ERR_NONE == (err = legacy_dbg_command(0x0, adr, len)))
 	  err = legacy_dbg_go((unsigned char*)data, len, 0); 
     }
@@ -357,7 +360,7 @@ int dbg_cpu0_read(uint32_t adr, uint32_t *data) {
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_read(4, 1, adr, (void *) data); // All CPU register reads / writes are bursts
+      err = adbg_axi_burst_read(4, 1, adr, (void *) data); // All CPU register reads / writes are bursts
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {
@@ -386,7 +389,7 @@ int dbg_cpu0_read_block(uint32_t adr, uint32_t *data, int count) {
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_read(4, count, adr, (void *) data); // All CPU register reads / writes are bursts
+      err = adbg_axi_burst_read(4, count, adr, (void *) data); // All CPU register reads / writes are bursts
       cable_flush();
       pthread_mutex_unlock(&dbg_access_mutex);
     }
@@ -417,7 +420,7 @@ int dbg_cpu0_write(uint32_t adr, uint32_t data) {
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_write((void *)&data, 4, 1, adr);
+      err = adbg_axi_burst_write((void *)&data, 4, 1, adr);
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {
@@ -445,7 +448,7 @@ int dbg_cpu0_write_block(uint32_t adr, uint32_t *data, int count) {
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_write((void *)data, 4, count, adr);
+      err = adbg_axi_burst_write((void *)data, 4, count, adr);
       cable_flush();
       pthread_mutex_unlock(&dbg_access_mutex);
     }
@@ -552,7 +555,7 @@ int dbg_cpu1_read(uint32_t adr, uint32_t *data)
 	  pthread_mutex_unlock(&dbg_access_mutex);
 	  return err;
 	}
-      err = adbg_wb_burst_read(4, 1, adr, (void *) data); // All CPU register reads / writes are bursts
+      err = adbg_axi_burst_read(4, 1, adr, (void *) data); // All CPU register reads / writes are bursts
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {
@@ -581,7 +584,7 @@ int dbg_cpu1_write(uint32_t adr, uint32_t data)
       pthread_mutex_unlock(&dbg_access_mutex);
       return err;
     }
-  err = adbg_wb_burst_write((void *)&data, 4, 1, adr);
+  err = adbg_axi_burst_write((void *)&data, 4, 1, adr);
     }
   else if(DEBUG_HARDWARE == DBG_HW_LEGACY)
     {

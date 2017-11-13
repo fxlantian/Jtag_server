@@ -39,6 +39,7 @@ with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <netinet/tcp.h>
 #include <string.h>
 #include <netinet/in.h>
+#include <malloc.h>
 
 /* Package includes */
 #include "except.h"
@@ -54,7 +55,7 @@ with this program.  If not, see <http://www.gnu.org/licenses/>.
 #endif
 
 /* Define to log each packet */
-#define RSP_TRACE  0
+#define RSP_TRACE  1
 
 /*! Name of the RSP service */
 #define OR1KSIM_RSP_SERVICE  "jtag-rsp"
@@ -69,7 +70,7 @@ with this program.  If not, see <http://www.gnu.org/licenses/>.
 /*! Trap instruction for OR32 */
 #define OR1K_TRAP_INSTR   0x21000001
 #define RV32_TRAP_INSTR   0x00100073
-#define RVC32_TRAP_INSTR  0x1000
+#define RVC32_TRAP_INSTR  0x8002
 
 #define IS_COMPRESSED(instr) ((instr & 0x3) != 0x3)
 
@@ -84,9 +85,11 @@ enum target_signal {
   TARGET_SIGNAL_BUS  = 10,
   TARGET_SIGNAL_SEGV = 11,
   TARGET_SIGNAL_ALRM = 14,
+  TARGET_SIGNAL_STOP = 17,
   TARGET_SIGNAL_USR2 = 31,
   TARGET_SIGNAL_PWR  = 32
 };
+
 
 /*! The maximum number of characters in inbound/outbound buffers.
  * The max is 16kB, and larger buffers make for faster
@@ -204,6 +207,15 @@ static void               rsp_vpkt (struct rsp_buf *buf);
 static void               rsp_write_mem_bin (struct rsp_buf *buf);
 static void               rsp_remove_matchpoint (struct rsp_buf *buf);
 static void               rsp_insert_matchpoint (struct rsp_buf *buf);
+//static bool               v_packet(struct rsp_buf *buf);
+static void               resumeCoresPrepare(int step);
+//static bool               halt();
+//static bool               is_stopped();
+//static bool               waitStop();
+static void               resumeCores(int step);
+static int                mp_hash_disable (enum mp_type       type, unsigned long int  addr);
+static int                mp_hash_enable (enum mp_type       type, unsigned long int  addr);
+//static bool               signal();
 
 void set_stall_state(int stall);
 
@@ -239,6 +251,7 @@ rsp_init (int portNum)
   rsp.client_fd      = -1;              /* i.e. invalid */
   rsp.sigval         =  0;              /* No exception */
   rsp.start_addr     = EXCEPT_RESET;    /* Default restart point */
+  
 
   /* Set up the matchpoint hash table */
   mp_hash_init ();
@@ -493,20 +506,22 @@ int handle_rsp (void)
           // *** TODO: Check return value of read()
           if(monitor_status == 'H')
             {
+             // printf("monitor_status is H\n");
               if(rsp.target_running)  // ignore if a duplicate event
                 {
                   rsp.target_running = 0;
                   // Log the exception so it can be sent back to GDB
-                  dbg_cpu0_read(SPR_DRR, &drrval);  // Read the DRR, find out why we stopped
+                  dbg_axi_read32(DBG_CAUSE_REG, &drrval);  // Read the DRR, find out why we stopped
                   rsp_exception(drrval);  // Send it to be translated and stored
-
+                  
                   /* If we have an unacknowledged exception and a client is available, tell
                      GDB. If this exception was a trap due to a memory breakpoint, then
                      adjust the NPC. */
                   if (rsp.client_waiting)
                     {
                       // Read the PPC
-                      dbg_cpu0_read(SPR_PPC, &ppcval);
+                      dbg_axi_read32(DBG_PPC_REG, &ppcval);
+                      
 
                       // This is structured the way it is to avoid the read of DMR2 unless it's necessary.
                       if (TARGET_SIGNAL_TRAP == rsp.sigval)
@@ -514,6 +529,7 @@ int handle_rsp (void)
                           if(NULL != mp_hash_lookup (BP_MEMORY, ppcval))  // Is this a breakpoint we set? (we also get a TRAP on single-step)
                             {
                               //fprintf(stderr, "0: Resetting NPC to PPC\n");
+                              //printf("bp set ppcval is %x\n",ppcval);
                               set_npc(ppcval);
                             }
                           else 
@@ -541,6 +557,7 @@ int handle_rsp (void)
           else if(monitor_status == 'R')
             {
               rsp.target_running = 1;
+              //printf("monitor_status is R\n");
               // If things are added here, be sure to ignore if this event is a duplicate
             }
           else
@@ -578,31 +595,32 @@ void rsp_exception (unsigned long int  except)
 {
   int  sigval;                  // GDB signal equivalent to exception
 
-  switch (except)
-    {
-    case SPR_DRR_RSTE:  sigval = TARGET_SIGNAL_PWR;  break;
-    case SPR_DRR_BUSEE: sigval = TARGET_SIGNAL_BUS;  break;
-    case SPR_DRR_DPFE:  sigval = TARGET_SIGNAL_SEGV; break;
-    case SPR_DRR_IPFE:  sigval = TARGET_SIGNAL_SEGV; break;
-    case SPR_DRR_TTE:   sigval = TARGET_SIGNAL_ALRM; break;
-    case SPR_DRR_AE:    sigval = TARGET_SIGNAL_BUS;  break;
-    case SPR_DRR_IIE:   sigval = TARGET_SIGNAL_ILL;  break;
-    case SPR_DRR_IE:    sigval = TARGET_SIGNAL_INT;  break;
-    case SPR_DRR_DME:   sigval = TARGET_SIGNAL_SEGV; break;
-    case SPR_DRR_IME:   sigval = TARGET_SIGNAL_SEGV; break;
-    case SPR_DRR_RE:    sigval = TARGET_SIGNAL_FPE;  break;
-    case SPR_DRR_SCE:   sigval = TARGET_SIGNAL_USR2; break;
-    case SPR_DRR_FPE:   sigval = TARGET_SIGNAL_FPE;  break;
-    case SPR_DRR_TE:    sigval = TARGET_SIGNAL_TRAP; break;
+  //uint32_t cause;
+  uint32_t hit;
+  //int signal;
+  char str[4];
+  int len;
+ 
+ 
+  // figure out why we are stopped
+  dbg_axi_read32(DBG_HIT_REG, &hit);
+    
 
-    // In the current OR1200 hardware implementation, a single-step does not create a TRAP,
-    // the DSR reads back 0.  GDB expects a TRAP, so...
-    case 0:             sigval = TARGET_SIGNAL_TRAP; break;
+    if (hit & 0x1)
+      sigval = TARGET_SIGNAL_TRAP;
+    else if(except & (1 << 31))
+      sigval = TARGET_SIGNAL_INT;
+    else if(except & (1 << 3))
+      sigval = TARGET_SIGNAL_TRAP;
+    else if(except & (1 << 2))
+      sigval = TARGET_SIGNAL_ILL;
+    else if(except & (1 << 5))
+      sigval = TARGET_SIGNAL_BUS;
+    else
+      sigval = TARGET_SIGNAL_STOP;
+ 
 
-    default:
-      fprintf (stderr, "Warning: Unknown RSP exception %lu: Ignored\n", except);
-      return;
-    }
+  
 
   if ((0 != rsp.sigval) && (sigval != rsp.sigval))
     {
@@ -713,10 +731,8 @@ rsp_server_request ()
   rsp.target_running = 0;  // This prevents an initial exception report to GDB (which it's not expecting)
   rsp.single_step_mode = 0;
 
-  /* Set up the CPU to break to the debug unit on exceptions. */
-  dbg_cpu0_read(SPR_DSR, &tmp);
-  dbg_cpu0_write(SPR_DSR, tmp|SPR_DSR_TE|SPR_DSR_FPE|SPR_DSR_RE|SPR_DSR_IIE|SPR_DSR_AE|SPR_DSR_BUSEE);
-
+  dbg_axi_write32(DBG_IE_REG, 0xF7FF);
+  dbg_axi_write32(DBG_BOOT_REG, 0x50000000);
   /* Enable TRAP exception, but don't otherwise change the SR */
   // TODO Don't manage to access this register while the core is not stopped
   // Not so annoying for Mia, we are always in supervisor mode
@@ -745,11 +761,11 @@ rsp_client_request ()
       return;
     }
 
-#if RSP_TRACE
+//#if RSP_TRACE
   printf ("Packet received %s: %d chars\n", buf->data, buf->len );
   fflush (stdout);
-#endif
-
+//#endif
+  printf ("Packet received symbol is %c \n", buf->data[0] );
   // Check if target is running.
   // If running, only process async BREAK command
   if(rsp.target_running)
@@ -767,7 +783,6 @@ rsp_client_request ()
         }
       return;
     }
-
   switch (buf->data[0])
     {
     case 0x03:
@@ -809,8 +824,13 @@ rsp_client_request ()
 
     case 'C':
       /* Continue with signal */
-      rsp_continue_with_signal (buf);
+      rsp_continue (buf);
       return;
+
+    case 'v':
+       rsp_vpkt(buf);
+       return ;
+
 
     case 'd':
       /* Disable debug using a general query */
@@ -912,7 +932,7 @@ rsp_client_request ()
     case 'S':
       /* Single step (one high level instruction) with signal. This could be
          hard without DWARF2 info */
-      rsp_step_with_signal (buf);
+      rsp_step (buf);
       return;
 
     case 't':
@@ -927,11 +947,7 @@ rsp_client_request ()
       put_str_packet ("OK");
       return;
 
-    case 'v':
-      /* Any one of a number of packets to control execution */
-      rsp_vpkt (buf);
-      return;
-
+   
     case 'X':
       /* Write memory (binary) */
       rsp_write_mem_bin (buf);
@@ -981,7 +997,7 @@ rsp_client_close ()
   }
 
   // Clear the DSR: don't transfer control to the debug unit for any reason
-  dbg_cpu0_write(SPR_DSR, 0);
+  dbg_axi_write32(DBG_CTRL_REG, 0);///debug_control
 
   // If target was running, restart it.
   // rsp.target_running is changed in this thread, so it won't have changed due to the above stall command.
@@ -1461,6 +1477,79 @@ mp_hash_lookup (enum mp_type       type,
 
 }       /* mp_hash_lookup () */
 
+static int 
+mp_hash_disable (enum mp_type       type,
+                unsigned long int  addr)
+{
+  int              hv   = addr % MP_HASH_SIZE;
+  struct mp_entry *curr;
+  uint32_t           instbuf[1];
+
+  /* Search */
+  for (curr = rsp.mp_hash[hv]; NULL != curr; curr = curr->next)
+    {
+      if ((type == curr->type) && (addr == curr->addr))
+        {
+          instbuf[0] = curr->instr;
+
+          // check if original instruction was compressed
+        //  printf("insert insn is %x",instbuf[0]);
+          if ( IS_COMPRESSED(instbuf[0]) ) {
+            dbg_axi_write16(addr, (uint16_t*)instbuf[0]);  // *** TODO Check return value
+          } else {
+            dbg_axi_write32(addr, instbuf[0]);  // *** TODO Check return value
+          }
+
+           while (1) {
+            uint32_t value;
+            dbg_axi_read32(addr, &value);
+           // printf("this value is %x\n", value);
+             if (value == instbuf[0]) break;
+            }
+
+          return  1;         /* The entry found */
+        }
+    }
+
+  /* Not found */
+  return  0;
+
+}       /* mp_hash_lookup () */
+
+static int 
+mp_hash_enable (enum mp_type       type,
+                unsigned long int  addr)
+{
+  int              hv   = addr % MP_HASH_SIZE;
+  struct mp_entry *curr;
+  uint32_t           instbuf[1];
+
+  /* Search */
+  for (curr = rsp.mp_hash[hv]; NULL != curr; curr = curr->next)
+    {
+      if ((type == curr->type) && (addr == curr->addr))
+        {
+          //instbuf[0] = curr->instr;
+
+          // check if original instruction was compressed
+         // printf("insert insn is %x",instbuf[0]);
+          if ( IS_COMPRESSED(instbuf[0]) ) {
+            instbuf[0] = RVC32_TRAP_INSTR;
+            dbg_axi_write16(addr, (uint16_t*)instbuf[0]);  // *** TODO Check return value
+          } else {
+            instbuf[0] = RV32_TRAP_INSTR;
+            dbg_axi_write32(addr, instbuf[0]);  // *** TODO Check return value
+          }
+
+          return  1;         /* The entry found */
+        }
+    }
+
+  /* Not found */
+  return  0;
+
+}       /* mp_hash_lookup () */
+
 
 /*---------------------------------------------------------------------------*/
 /*!Delete an entry from the matchpoint hash table
@@ -1690,18 +1779,12 @@ static unsigned int set_npc (unsigned long int  addr)
 {
   int errcode;
 
-  errcode = dbg_cpu0_write(SPR_NPC, addr);
+  errcode = dbg_axi_write32(SPR_NPC, addr);
+  errcode = dbg_axi_write32(SPR_PPC, addr);
   cached_npc = addr;
   use_cached_npc = 1;
 
-  /*  This was done in the simulator.  Is any of this necessary on the hardware?  --NAY
-    if (cpu_state.pc != addr)
-    {
-    cpu_state.pc         = addr;
-    cpu_state.delay_insn = 0;
-    pcnext               = addr + 4;
-    }
-  */
+ 
   return errcode;
 }       /* set_npc () */
 
@@ -1715,7 +1798,7 @@ static void
 rsp_report_exception ()
 {
   struct rsp_buf  buf;
-
+  
   /* Construct a signal received packet */
   buf.data[0] = 'S';
   buf.data[1] = hexchars[rsp.sigval >> 4];
@@ -1740,6 +1823,13 @@ static void
 rsp_continue (struct rsp_buf *buf)
 {
   unsigned long int  addr;              /* Address to continue from, if any */
+  uint32_t           instbuf[1];
+  uint32_t hit;
+  uint32_t cause;
+  uint32_t ppc;
+  uint32_t npc;
+  uint32_t data;
+ 
 
   if (strncmp(buf->data, "c", 2))
     {
@@ -1756,11 +1846,130 @@ rsp_continue (struct rsp_buf *buf)
           set_npc (addr);
         }
     }
+  dbg_axi_read32(DBG_PPC_REG, &ppc);
+  dbg_axi_read32(DBG_NPC_REG, &npc);
+  dbg_axi_read32(DBG_HIT_REG, &hit);
+  dbg_axi_read32(DBG_CAUSE_REG, &cause);
 
-  rsp_continue_generic (EXCEPT_NONE);
+  // if there is a breakpoint at this address, let's remove it and single-step over it
+  int hasStepped = 0;
+
+  printf("Preparing core to resume (step: %d, ppc: 0x%x)\n", 0, ppc);
+ 
+  if(NULL != mp_hash_lookup (BP_MEMORY, ppc))  {
+    printf("Core is stopped on a breakpoint, stepping to go over (addr: 0x%x)\n", ppc);
+
+   //rsp.bp->disable(ppc);
+   mp_hash_disable (BP_MEMORY, ppc);
+   dbg_axi_write32(DBG_NPC_REG, ppc);// re-execute this instruction
+   dbg_axi_write32(DBG_CTRL_REG, 0x1); // single-step
+   mp_hash_enable (BP_MEMORY, ppc);
+   hasStepped = 1;
+   // dbg_axi_write32(DBG_CTRL_REG, 0x1);// single-step
+   
+   //printf("continue excute\n");
+  
+  }
+
+ 
+    // clear hit register, has to be done before CTRL
+    dbg_axi_write32(DBG_HIT_REG, 0);
+    rsp_continue_generic (EXCEPT_NONE);
+  
+
+  
+  
 
 }       /* rsp_continue () */
 
+
+
+static void
+resumeCoresPrepare(int step) {
+
+  uint32_t hit;
+  uint32_t cause;
+  uint32_t ppc;
+  uint32_t npc;
+  uint32_t data;
+
+  // now let's handle software breakpoints
+  dbg_axi_read32(DBG_PPC_REG, &ppc);
+  dbg_axi_read32(DBG_NPC_REG, &npc);
+  dbg_axi_read32(DBG_HIT_REG, &hit);
+  dbg_axi_read32(DBG_CAUSE_REG, &cause);
+
+  // if there is a breakpoint at this address, let's remove it and single-step over it
+  int hasStepped = 0;
+
+  printf("Preparing core to resume (step: %d, ppc: 0x%x)\n", step, ppc);
+
+  if(NULL != mp_hash_lookup (BP_MEMORY, ppc))  {
+    printf("Core is stopped on a breakpoint, stepping to go over (addr: 0x%x)\n", ppc);
+
+   //rsp.bp->disable(ppc);
+   mp_hash_disable (BP_MEMORY, ppc);
+   dbg_axi_write32(DBG_NPC_REG, ppc);// re-execute this instruction
+   dbg_axi_write32(DBG_CTRL_REG, 0x1); // single-step
+    while (1) {
+      uint32_t value;
+      dbg_axi_read32(DBG_CTRL_REG, &value);
+      if ((value >> 16) & 1) break;
+    }
+   mp_hash_enable (BP_MEMORY, ppc);
+   hasStepped = 1;
+   // dbg_axi_write32(DBG_CTRL_REG, 0x1);// single-step
+   
+   //printf("continue excute\n");
+  }
+
+ 
+    dbg_axi_write32(DBG_HIT_REG, 0);
+
+    if (step)
+      rsp_step_generic(EXCEPT_NONE);
+    else
+      rsp_continue_generic(EXCEPT_NONE);
+ 
+}
+
+static void
+resumeCores(int step) {
+  uint32_t hit;
+  uint32_t cause;
+  uint32_t ppc;
+  uint32_t npc;
+  uint32_t data;
+
+  // now let's handle software breakpoints
+  dbg_axi_read32(DBG_PPC_REG, &ppc);
+  dbg_axi_read32(DBG_NPC_REG, &npc);
+  dbg_axi_read32(DBG_HIT_REG, &hit);
+  dbg_axi_read32(DBG_CAUSE_REG, &cause);
+
+  // if there is a breakpoint at this address, let's remove it and single-step over it
+  int hasStepped = 0;
+
+  if (NULL != mp_hash_lookup (BP_MEMORY, ppc)) {
+     //rsp.bp->disable(ppc);
+     dbg_axi_write32(DBG_NPC_REG, ppc); // re-execute this instruction
+     dbg_axi_write32(DBG_CTRL_REG, 0x1); // single-step
+     //rsp.bp->enable(ppc);
+     hasStepped = 1;
+  }
+
+  if (!step || !hasStepped) {
+    // clear hit register, has to be done before CTRL
+    dbg_axi_write32(DBG_HIT_REG, 0);
+    
+
+    if (step)
+      dbg_axi_write32(DBG_CTRL_REG, 0x1);
+    else
+      dbg_axi_write32(DBG_CTRL_REG, 0);
+  }
+
+}
 
 /*---------------------------------------------------------------------------*/
 /*!Handle a RSP continue with signal request
@@ -1795,7 +2004,10 @@ rsp_continue_generic (unsigned long int  except)
   uint32_t tmp;
 
   /* Clear Debug Reason Register */
-  dbg_cpu0_write(SPR_DRR, 0);
+  dbg_axi_write32(DBG_CAUSE_REG, 0);
+  dbg_axi_read32(DBG_CTRL_REG, &tmp);
+      tmp &= ~DBG_CTRL_ST;
+  dbg_axi_write32(DBG_CTRL_REG, tmp);
   
 #if 0
   // In Mia Wallace, SPR_DM2 does not exist
@@ -1808,9 +2020,9 @@ rsp_continue_generic (unsigned long int  except)
 
   /* Clear the single step trigger in Debug Mode Register 1 and set traps to be
      handled by the debug unit in the Debug Stop Register */
-  dbg_cpu0_read(SPR_DMR1, &tmp);
-  tmp &= ~(SPR_DMR1_ST|SPR_DMR1_BT); // clear single-step and trap-on-branch
-  dbg_cpu0_write(SPR_DMR1, tmp);
+ // dbg_axi_read32(DBG_CTRL_REG, &tmp);
+  //tmp &= ~DBG_CTRL_ST; // clear single-step and trap-on-branch
+  //dbg_axi_write32(DBG_CTRL_REG, DBG_CTRL_HT);
 
   // *** TODO Is there ever a situation where the DSR will not be set to give us control on a TRAP?  --NAY
 
@@ -1843,7 +2055,7 @@ rsp_read_all_regs ()
 
   // Read all the GPRs in a single burst, for efficiency
   // TODO with bursts, we get a wrong CRC from Mia
-  errcode = dbg_cpu0_read_block(SPR_GPR_BASE, regbuf, MAX_GPRS);
+  errcode = dbg_axi_read_block32(DBG_GPR_BASE, regbuf, MAX_GPRS);
   
   /* Format the GPR data for output */
   for (r = 0; r < MAX_GPRS; r++)
@@ -1852,7 +2064,7 @@ rsp_read_all_regs ()
     }
   
   /* NPC */
-  errcode |= dbg_cpu0_read_block(SPR_NPC, regbuf, 1);
+  errcode |= dbg_axi_read_block32(DBG_NPC_REG, regbuf, 1);
   
   // Note that reg2hex adds a NULL terminator; as such, they must be
   // put in buf.data in numerical order:  PPC, NPC, SR
@@ -1901,12 +2113,12 @@ rsp_write_all_regs (struct rsp_buf *buf)
       regbuf[r] = hex2reg (&(buf->data[r * 8]));
     }
 
-  errcode = dbg_cpu0_write_block(SPR_GPR_BASE, regbuf, MAX_GPRS);
+  errcode = dbg_axi_write_block32(DBG_GPR_BASE, regbuf, MAX_GPRS);
 
   /* PPC, NPC and SR */
   regbuf[0] = hex2reg (&(buf->data[NPC_REGNUM * 8]));
 
-  errcode |= dbg_cpu0_write_block(SPR_NPC, regbuf, 3);
+  errcode |= dbg_axi_write_block32(DBG_NPC_REG, regbuf, 3);
 
   if(errcode == APP_ERR_NONE)
     put_str_packet ("OK");
@@ -1960,7 +2172,7 @@ rsp_read_mem (struct rsp_buf *buf)
 
   // Do the memory read into a temporary buffer
   unsigned char *tmpbuf = (unsigned char *) malloc(len);  // *** TODO check return, don't always malloc (use realloc)
-  errcode = dbg_wb_read_block8(addr, tmpbuf, len);
+  errcode = dbg_axi_read_block8(addr, tmpbuf, len);
 
 
   /* Refill the buffer with the reply */
@@ -2026,7 +2238,7 @@ rsp_write_mem (struct rsp_buf *buf)
     }
 
   /* Find the start of the data and check there is the amount we expect. */
-  symdat = memchr ((const void *)buf->data, ':', GDB_BUF_MAX) + 1;
+  symdat = memchr ((const char*)buf->data, ':', GDB_BUF_MAX) + 1;
   datlen = buf->len - (symdat - buf->data);
 
   /* Sanity check */
@@ -2049,7 +2261,7 @@ rsp_write_mem (struct rsp_buf *buf)
       tmpbuf[off] = (nyb1 << 4) | nyb2;
     }
 
-  errcode = dbg_wb_write_block8(addr, tmpbuf, len);
+  errcode = dbg_axi_write_block8(addr, tmpbuf, len);
   free(tmpbuf);
 
   /* Can't really check if the memory addresses are valid on hardware. */
@@ -2082,6 +2294,14 @@ rsp_read_reg (struct rsp_buf *buf)
   uint32_t tmp;
   unsigned int errcode = APP_ERR_NONE;
 
+ // int data;
+ // int *state;
+  //data |= 0x1 << 16;
+  //dbg_axi_write32(DBG_CTRL_REG, data);
+  //while(tmp!=data){
+  //  dbg_axi_read32(DBG_CTRL_REG, &tmp);
+ // }
+
   /* Break out the fields from the data */
   if (1 != sscanf (buf->data, "p%x", &regnum))
     {
@@ -2094,23 +2314,27 @@ rsp_read_reg (struct rsp_buf *buf)
   /* Get the relevant register */
   if (regnum < MAX_GPRS)
     {
-      errcode = dbg_cpu0_read(SPR_GPR_BASE+regnum, &tmp);
+      errcode = dbg_axi_read32(DBG_GPR_BASE+regnum, &tmp);
     }
   else if (NPC_REGNUM == regnum)
     {
       if(use_cached_npc) {
         tmp = cached_npc;
       } else {
-        errcode = dbg_cpu0_read(SPR_NPC, &tmp);
+        errcode = dbg_axi_read32(DBG_NPC_REG, &tmp);
       }
     }
   else
     {
+      
+
+      regnum=regnum<<2;
+      errcode = dbg_axi_read32(DBG_CSR_BASE+regnum, &tmp);
       /* Error response if we don't know the register */
-      fprintf (stderr, "Warning: Attempt to read unknown register 0x%x: "
-               "ignored\n", regnum);
-      put_str_packet ("E01");
-      return;
+      //fprintf (stderr, "Warning: Attempt to read unknown register 0x%x: "
+      //         "ignored\n", regnum);
+     // put_str_packet ("E01");
+     // return;
     }
 
   if(errcode == APP_ERR_NONE) {
@@ -2156,7 +2380,7 @@ rsp_write_reg (struct rsp_buf *buf)
   /* Set the relevant register.  Must translate between GDB register numbering and hardware reg. numbers. */
   if (regnum < MAX_GPRS)
     {
-      errcode = dbg_cpu0_write(SPR_GPR_BASE+regnum, hex2reg(valstr));
+      errcode = dbg_axi_write32(DBG_GPR_BASE+regnum, hex2reg(valstr));
     }
   else if (NPC_REGNUM == regnum)
     {
@@ -2198,16 +2422,10 @@ rsp_query (struct rsp_buf *buf)
          support a thread concept, this is the appropriate response. */
       put_str_packet ("");
     }
-  else if (0 == strncmp ("qCRC", buf->data, strlen ("qCRC")))
-    {
-      /* Return CRC of memory area */
-      fprintf (stderr, "Warning: RSP CRC query not supported\n");
-      put_str_packet ("E01");
-    }
-  else if (0 == strcmp ("qfThreadInfo", buf->data))
+  else  if (0 == strcmp ("qfThreadInfo", buf->data))
     {
       /* Return info about active threads. We return just '-1' */
-      put_str_packet ("m-1");
+      put_str_packet ("m1");
     }
   else if (0 == strcmp ("qsThreadInfo", buf->data))
     {
@@ -2230,17 +2448,6 @@ rsp_query (struct rsp_buf *buf)
     {
       /* Report any relocation */
       put_str_packet ("Text=0;Data=0;Bss=0");
-    }
-  else if (0 == strncmp ("qP", buf->data, strlen ("qP")))
-    {
-      /* Deprecated and replaced by 'qThreadExtraInfo' */
-      fprintf (stderr, "Warning: RSP qP deprecated: no info returned\n");
-      put_str_packet ("");
-    }
-  else if (0 == strncmp ("qRcmd,", buf->data, strlen ("qRcmd,")))
-    {
-      /* This is used to interface to commands to do "stuff" */
-      rsp_command (buf);
     }
   else if (0 == strncmp ("qSupported", buf->data, strlen ("qSupported")))
     {
@@ -2272,14 +2479,7 @@ rsp_query (struct rsp_buf *buf)
       buf->len = strlen (buf->data);
       put_packet (buf);
     }
-  else if (0 == strncmp ("qXfer:", buf->data, strlen ("qXfer:")))
-    {
-      /* For now we support no 'qXfer' requests, but these should not be
-         expected, since they were not reported by 'qSupported' */
-      fprintf (stderr, "Warning: RSP 'qXfer' not supported: ignored\n");
-      put_str_packet ("");
-    }
-  else if (0 == strncmp ("qAttached", buf->data, strlen ("qAttached")))
+  else  if (0 == strncmp ("qAttached", buf->data, strlen ("qAttached")))
     {
       /* GDB is inquiring whether it created a process or attached to an
        * existing one. We don't support this feature.  Note this packet
@@ -2436,6 +2636,11 @@ static void
 rsp_step (struct rsp_buf *buf)
 {
   unsigned long int  addr;              /* The address to step from, if any */
+  uint32_t hit;
+  uint32_t cause;
+  uint32_t ppc;
+  uint32_t npc;
+  uint32_t data;
 
   if(strncmp(buf->data, "s", 2))
     {
@@ -2449,10 +2654,35 @@ rsp_step (struct rsp_buf *buf)
         {
           /* Set the address as the value of the next program counter */
           // TODO  Is implementing this really just this simple?
-          //set_npc (addr);
+          set_npc (addr);
         }
     }
 
+  dbg_axi_read32(DBG_PPC_REG, &ppc);
+  dbg_axi_read32(DBG_NPC_REG, &npc);
+  dbg_axi_read32(DBG_HIT_REG, &hit);
+  dbg_axi_read32(DBG_CAUSE_REG, &cause);
+
+  // if there is a breakpoint at this address, let's remove it and single-step over it
+  int hasStepped = 0;
+
+  printf("Preparing core to resume (step: %d, ppc: 0x%x)\n", 1, ppc);
+ 
+  if(NULL != mp_hash_lookup (BP_MEMORY, ppc))  {
+    printf("Core is stopped on a breakpoint, stepping to go over (addr: 0x%x)\n", ppc);
+
+   //rsp.bp->disable(ppc);
+   mp_hash_disable (BP_MEMORY, ppc);
+   dbg_axi_write32(DBG_NPC_REG, ppc);// re-execute this instruction
+   dbg_axi_write32(DBG_CTRL_REG, 0x1); // single-step
+   mp_hash_enable (BP_MEMORY, ppc);
+   hasStepped = 1;
+   // dbg_axi_write32(DBG_CTRL_REG, 0x1);// single-step
+   
+  // printf("continue excute\n");
+  
+  }
+ 
   rsp_step_generic (EXCEPT_NONE);
 
 }       /* rsp_step () */
@@ -2494,7 +2724,7 @@ rsp_step_generic (unsigned long int  except)
 
   /* Clear Debug Reason Register */
   tmp = 0;
-  dbg_cpu0_write(SPR_DRR, tmp);  // *** TODO Check return value of all hardware accesses
+  dbg_axi_write32(DBG_CAUSE_REG, 0);  // *** TODO Check return value of all hardware accesses
   
 #if 0
   // In Mia Wallace, SPR_DM2 does not exist
@@ -2509,14 +2739,15 @@ rsp_step_generic (unsigned long int  except)
      handled by the debug unit in the Debug Stop Register */
   if(!rsp.single_step_mode)
     { 
-      dbg_cpu0_read(SPR_DMR1, &tmp);
-      tmp |= SPR_DMR1_ST|SPR_DMR1_BT;
-      dbg_cpu0_write(SPR_DMR1, tmp);
-      dbg_cpu0_read(SPR_DSR, &tmp);
-      if(!(tmp & SPR_DSR_TE)) {
-        tmp |= SPR_DSR_TE;
-        dbg_cpu0_write(SPR_DSR, tmp);
-      }
+      //printf("single step mode in\n");
+      dbg_axi_read32(DBG_CTRL_REG, &tmp);
+      tmp |= DBG_CTRL_ST;
+      dbg_axi_write32(DBG_CTRL_REG, tmp);
+     // dbg_axi_read32(DBG_CAUSE_REG, &tmp);
+     // if(!(tmp & SPR_DSR_TE)) {
+      //  tmp |= SPR_DSR_TE;
+      //  dbg_axi_write32(DBG_CAUSE_REG, tmp);
+      //}
       rsp.single_step_mode = 1;
     }
 
@@ -2546,7 +2777,19 @@ rsp_vpkt (struct rsp_buf *buf)
       put_str_packet ("S05");
       return;
     }
+     else if (0 == strcmp ("vKill;a410", buf->data))
+    {
+      /* For now we don't support this. */
+      put_str_packet ("OK");
+      return;
+    }
   else if (0 == strcmp ("vCont?", buf->data))
+    {
+      /* For now we don't support this. */
+      put_str_packet ("");
+      return;
+    }
+  else if (0 == strcmp ("vMustReplyEmpty", buf->data))
     {
       /* For now we don't support this. */
       put_str_packet ("");
@@ -2556,8 +2799,46 @@ rsp_vpkt (struct rsp_buf *buf)
     {
       /* This shouldn't happen, because we've reported non-support via vCont?
          above */
-      fprintf (stderr, "Warning: RSP vCont not supported: ignored\n" );
-      return;
+      int threadsCmd[1];
+       threadsCmd[0] = 0;
+    // vCont can contains several commands, handle them in sequence
+      char *str = strtok(&buf->data[6], ";");
+    while(str != NULL) {
+      // Extract command and thread ID
+      char *delim = index(str, ':');
+      int tid = -1;
+      if (delim != NULL) {
+        tid = atoi(delim+1);
+        *delim = 0;
+      }
+
+      int cont = 0;
+      int step = 0;
+      printf("subcommand is %c\n", str[0]);
+      if (str[0] == 'C' || str[0] == 'c') {
+        cont = 1;
+        step = 0;
+      } else if (str[0] == 'S' || str[0] == 's') {
+        cont = 1;
+        step = 1;
+      } else {
+        printf("Unsupported command in vCont packet: %s\n", str);
+        exit(-1);
+      }
+
+      if (cont) {
+
+          resumeCoresPrepare(step);
+         
+        }
+    
+
+      str = strtok(NULL, ";");
+    }
+
+   
+     return;
+      
     }
   else if (0 == strncmp ("vFile:", buf->data, strlen ("vFile:")))
     {
@@ -2662,7 +2943,7 @@ rsp_write_mem_bin (struct rsp_buf *buf)
     }
 
   /* Write the bytes to memory */
-  errcode = dbg_wb_write_block8(addr, (uint8_t *) bindat, len);
+  errcode = dbg_axi_write_block8(addr, (uint8_t *) bindat, len);
 
   // We can't really verify if the memory target address exists or not.
   // Don't write to non-existant memory unless your system wishbone implementation
@@ -2730,10 +3011,11 @@ rsp_remove_matchpoint (struct rsp_buf *buf)
           instbuf[0] = mpe->instr;
 
           // check if original instruction was compressed
+          //printf("insert insn is %x",instbuf[0]);
           if ( IS_COMPRESSED(instbuf[0]) ) {
-            dbg_wb_write_block16(addr, (uint16_t*)instbuf, 1);  // *** TODO Check return value
+            dbg_axi_write16(addr, (uint16_t*)instbuf[0]);  // *** TODO Check return value
           } else {
-            dbg_wb_write_block32(addr, instbuf, 1);  // *** TODO Check return value
+            dbg_axi_write32(addr, instbuf[0]);  // *** TODO Check return value
           }
 
           //fprintf(stderr, "Replacing instr with original at addr %08X\n", addr);
@@ -2741,9 +3023,9 @@ rsp_remove_matchpoint (struct rsp_buf *buf)
 #ifdef PULP
           // With the shared pcache, we can only flush the whole cache
           uint32_t val = 0;
-          dbg_wb_write_block32(ICACHE_CTRL_BASE_ADDR, &val, 1); // Disable all shared banks
+          dbg_axi_write_block32(ICACHE_CTRL_BASE_ADDR, &val, 1); // Disable all shared banks
           val = 0xFFFFFFFF;
-          dbg_wb_write_block32(ICACHE_CTRL_BASE_ADDR, &val, 1); // Enable all shared banks
+          dbg_axi_write_block32(ICACHE_CTRL_BASE_ADDR, &val, 1); // Enable all shared banks
 
           // Set NPC if needed
           dbg_cpu0_read(SPR_NPC, &val);
@@ -2814,13 +3096,15 @@ rsp_remove_matchpoint (struct rsp_buf *buf)
 
    @param[in] buf  The command received                                      */
 /*---------------------------------------------------------------------------*/
+
 static void
 rsp_insert_matchpoint (struct rsp_buf *buf)
 {
   enum mp_type       type;              /* What sort of matchpoint */
   uint32_t           addr;              /* Address specified */
   int                len;               /* Matchpoint length (not used) */
-  uint32_t           instbuf[1];
+  uint32_t           instbuf;
+  uint32_t           binstbuf;
   int                hwp;               /* Which hardware watchpoint we use */
   uint32_t           regaddr;           /* Used to set HW watchpoints */
   uint32_t           regdata;           /* ditto */
@@ -2847,25 +3131,29 @@ rsp_insert_matchpoint (struct rsp_buf *buf)
     {
     case BP_MEMORY:
       /* Memory breakpoint - substitute a TRAP instruction */
-      dbg_wb_read_block32(addr, instbuf, 1);  // Get the old instruction.  *** TODO Check return value
-      mp_hash_add (type, addr, instbuf[0]);
+      //printf("bp addr is %x\n",addr);
+      dbg_axi_read32(addr, &instbuf);  // Get the old instruction.  *** TODO Check return value
+      //printf("bp insn is %x\n",instbuf);
+      mp_hash_add (type, addr, instbuf);
 
       // check if the instruction is compressed
-      if ( IS_COMPRESSED(instbuf[0]) ) {
-        instbuf[0] = RVC32_TRAP_INSTR;  // Set the TRAP instruction
-        dbg_wb_write_block16(addr, (uint16_t*)instbuf, 1);  // *** TODO Check return value
+      if ( IS_COMPRESSED(instbuf) ) {
+        binstbuf = RVC32_TRAP_INSTR;  // Set the TRAP instruction
+        //printf("it is compress inst\n");
+        dbg_axi_write16(addr, binstbuf);  // *** TODO Check return value
       } else {
-        instbuf[0] = RV32_TRAP_INSTR;  // Set the TRAP instruction
-        dbg_wb_write_block32(addr, instbuf, 1);  // *** TODO Check return value
+        binstbuf = RV32_TRAP_INSTR;  // Set the TRAP instruction
+         //printf("it is 32 inst\n");
+        dbg_axi_write32(addr, binstbuf);  // *** TODO Check return value
       }
 #if 0
       dbg_cpu0_write(SPR_ICBIR, addr);  // Flush the modified instruction from the cache
 #elif defined PULP
       // With the shared pcache, we can only flush the whole cache
       uint32_t val = 0;
-      dbg_wb_write_block32(ICACHE_CTRL_BASE_ADDR, &val, 1); // Disable all shared banks
+      dbg_axi_write_block32(ICACHE_CTRL_BASE_ADDR, &val, 1); // Disable all shared banks
       val = 0xFFFFFFFF;
-      dbg_wb_write_block32(ICACHE_CTRL_BASE_ADDR, &val, 1); // Enable all shared banks
+      dbg_axi_write_block32(ICACHE_CTRL_BASE_ADDR, &val, 1); // Enable all shared banks
 
       // Set NPC if needed
       dbg_cpu0_read(SPR_NPC, &val);

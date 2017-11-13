@@ -29,6 +29,7 @@
 
 #include "dbg_api.h"
 #include "errcodes.h"
+#include "spr-defs.h"
 
 #define debug(...) if (getenv("ADV_DEBUG")) fprintf(stderr, __VA_ARGS__ )
 
@@ -175,7 +176,7 @@ void *target_handler(void *arg)
   fd_set  readset;
   int i, fd, ret, nfds;
   char cmd;
-  unsigned char target_status;
+  uint32_t target_status;
 
   debug("Target handler thread started!\n");
 
@@ -183,7 +184,7 @@ void *target_handler(void *arg)
     {
       // Set this each loop, it may be changed by the select() call
       tv.tv_sec = 0;
-      tv.tv_usec = 250000;  // 1/4 second timeout when polling
+      tv.tv_usec = 100000;  // 1/4 second timeout when polling
 
       FD_ZERO(&readset);
       nfds = 0;
@@ -239,7 +240,9 @@ void *target_handler(void *arg)
 			}
 		      else if(cmd == 'U')  
 			{
-			  if(!target_is_running) stall_cpu(0);
+			  
+        //printf("excute stall cpu\n");
+        if(!target_is_running) stall_cpu(0);
 			  notify_listeners("A", 1);
 			  notify_listeners("R", 1);
 			}
@@ -267,11 +270,13 @@ void *target_handler(void *arg)
 	{
 	  debug("Monitor polling hardware!\n");
 	  // Poll target hardware
-	  ret = dbg_cpu0_read_ctrl(0, &target_status);
+	  ret = dbg_axi_read32(DBG_CTRL_REG, &target_status);
+    //printf("target status is %x\n",target_status);
 	  if(ret != APP_ERR_NONE)
 	    fprintf(stderr, "ERROR 0x%X while polling target CPU status\n", ret);
 	  else {
-	    if(target_status & 0x01)  // Did we get the stall bit?  Bit 0 is STALL bit.
+      
+	    if(target_status & 0x010000)  // Did we get the stall bit?  Bit 0 is STALL bit.
 	      {
 		debug("Monitor poll found CPU stalled!\n");
 		target_is_running = 0;
@@ -280,7 +285,7 @@ void *target_handler(void *arg)
 		pthread_mutex_unlock(&pipes_mutex);
 	      }
 	  }
-	}  // if(target_is_running)
+	} // if(target_is_running)
 
 
     }  // while(1), main loop
@@ -298,10 +303,20 @@ void *target_handler(void *arg)
 void stall_cpu(int stall)
 {
   int retval = 0;
+  uint32_t tmp;
   unsigned char data = (stall>0)? 1:0;
 
   // Actually start or stop the CPU hardware
-  retval = dbg_cpu0_write_ctrl(0, data);  // 0x01 is the STALL command bit
+  if(stall){
+  dbg_axi_read32(DBG_CTRL_REG, &tmp);
+  //tmp &=DBG_CTRL_HT; // clear single-step and trap-on-branch
+  dbg_axi_write32(DBG_CTRL_REG, DBG_CTRL_HT);
+}else {
+   dbg_axi_read32(DBG_CTRL_REG, &tmp);
+  tmp &=~DBG_CTRL_HT; // clear single-step and trap-on-branch
+  dbg_axi_write32(DBG_CTRL_REG, tmp);
+}
+  retval = dbg_axi_write32(0, data);  // 0x01 is the STALL command bit
   if(retval != APP_ERR_NONE)
     fprintf(stderr, "ERROR 0x%X sending async STALL to target.\n", retval);
 
@@ -327,3 +342,6 @@ void notify_listeners(char *outstr, int length)
       }
     }
 }
+
+
+

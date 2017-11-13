@@ -8,7 +8,7 @@
 #define DBG_MODULE_SELECT_REG_SIZE 5
 #define DBG_MAX_MODULES 4  // used to size an array
 
-#define DC_WISHBONE 0
+#define DC_AXI      0
 #define DC_CPU0     1
 #define DC_CPU1     2
 #define DC_JSP      3
@@ -72,8 +72,8 @@ int adbg_select_ctrl_reg(unsigned long regidx);
 int adbg_ctrl_write(unsigned long regidx, uint32_t *cmd_data, int length_bits);
 int adbg_ctrl_read(unsigned long regidx, uint32_t *data, int databits);
 int adbg_burst_command(unsigned int opcode, unsigned long address, int length_words);
-int adbg_wb_burst_read(int word_size_bytes, int word_count, unsigned long start_address, void *data);
-int adbg_wb_burst_write(void *data, int word_size_bytes, int word_count, unsigned long start_address);
+int adbg_axi_burst_read(int word_size_bytes, int word_count, unsigned long start_address, void *data);
+int adbg_axi_burst_write(void *data, int word_size_bytes, int word_count, unsigned long start_address);
 int adbg_jsp_transact(unsigned int *bytes_to_send, const char *data_to_send, unsigned int *bytes_received, char *data_received);
 
 #endif

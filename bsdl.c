@@ -194,7 +194,7 @@ bsdlinfo *get_bsdl_info(uint32_t idcode)
 	  direntry = readdir(bsdl_open_dir);
 	  if(direntry == NULL)
 	    {  // We've exhausted this directory
-	      debug("Next bsdl directory\n");
+	      printf("Next bsdl directory\n");
 	      closedir(bsdl_open_dir);
 	      bsdl_open_dir = NULL;
 	      break;
@@ -203,7 +203,8 @@ bsdlinfo *get_bsdl_info(uint32_t idcode)
 	  // *** If a subdirectory, continue!!
 
 	  // Check if it's a BSDL file: .bsd, .bsdl, .BSD, .BSDL
-	  debug("Checking file \'%s\'\n", direntry->d_name);
+     // printf("Checking file \'%s\'\n", direntry->d_name);
+	  //debug("Checking file \'%s\'\n", direntry->d_name);
 	  c = strrchr(direntry->d_name, '.');
 	  debug("File extension is \'%s\'\n", c);
 	  if(c == NULL)
@@ -239,7 +240,8 @@ bsdlinfo *get_bsdl_info(uint32_t idcode)
       strcat(bsdl_scratchpad, direntry->d_name);
 
       // Parse the BSDL file we found
-      debug("Parsing file \'%s\'\n", bsdl_scratchpad);
+      printf("Parsing file \'%s\'\n", bsdl_scratchpad);
+      //debug("Parsing file \'%s\'\n", bsdl_scratchpad);
       ptr = parse_extract_values(bsdl_scratchpad);
       
       // If we got good data...

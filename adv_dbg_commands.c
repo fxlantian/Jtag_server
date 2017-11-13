@@ -133,7 +133,7 @@ int adbg_select_ctrl_reg(unsigned long regidx)
     return APP_ERR_NONE;
 
   switch(current_chain) {
-  case DC_WISHBONE:
+  case DC_AXI:
     index_len = DBG_WB_REG_SEL_LEN;
     opcode = DBG_WB_CMD_IREG_SEL;
     break;
@@ -196,7 +196,7 @@ int adbg_ctrl_write(unsigned long regidx, uint32_t *cmd_data, int length_bits) {
   debug("ctrl wr idx %ld dat 0x%lX\n", regidx, cmd_data[0]);
 
   switch(current_chain) {
-  case DC_WISHBONE:
+  case DC_AXI:
     index_len = DBG_WB_REG_SEL_LEN;
     opcode = DBG_WB_CMD_IREG_WR;
     break;
@@ -256,7 +256,7 @@ int adbg_ctrl_read(unsigned long regidx, uint32_t *data, int databits) {
 
   // There is no 'read' command, We write a NOP to read
   switch(current_chain) {
-  case DC_WISHBONE:
+  case DC_AXI:
     opcode = DBG_WB_CMD_NOP;
     opcode_len = DBG_WB_OPCODE_LEN;
     break;
@@ -348,7 +348,7 @@ int adbg_burst_command(unsigned int opcode, unsigned long address, int length_wo
 // the CRC is only checked for the final burst read.  Thus, if errors/partial retries
 // break up a transfer into multiple bursts, only the last burst will be CRC protected.
 #define MAX_BUS_ERRORS 10
-int adbg_wb_burst_read(int word_size_bytes, int word_count, unsigned long start_address, void *data)
+int adbg_axi_burst_read(int word_size_bytes, int word_count, unsigned long start_address, void *data)
 {
   unsigned char opcode;
   uint8_t status;
@@ -380,7 +380,7 @@ int adbg_wb_burst_read(int word_size_bytes, int word_count, unsigned long start_
 
     // Select the appropriate opcode
     switch(current_chain) {
-    case DC_WISHBONE:
+    case DC_AXI:
       if (word_size_bytes == 1) opcode = DBG_WB_CMD_BREAD8;
       else if(word_size_bytes == 2) opcode = DBG_WB_CMD_BREAD16;
       else if(word_size_bytes == 4) opcode = DBG_WB_CMD_BREAD32;
@@ -541,7 +541,7 @@ int adbg_wb_burst_read(int word_size_bytes, int word_count, unsigned long start_
 
 
    // Now, read the error register, and retry/recompute as necessary.
-   if(current_chain == DC_WISHBONE)
+   if(current_chain == DC_AXI)
      {
        err |= adbg_ctrl_read(DBG_WB_REG_ERROR, err_data, 1);  // First, just get 1 bit...read address only if necessary,
        if(err_data[0] & 0x1) {  // Then we have a problem.
@@ -566,7 +566,7 @@ int adbg_wb_burst_read(int word_size_bytes, int word_count, unsigned long start_
 }
 
 // Set up and execute a burst write to a contiguous set of addresses
-int adbg_wb_burst_write(void *data, int word_size_bytes, int word_count, unsigned long start_address)
+int adbg_axi_burst_write(void *data, int word_size_bytes, int word_count, unsigned long start_address)
 {
   unsigned char opcode;
   uint32_t datawords[2] = {0,0};
@@ -595,7 +595,7 @@ int adbg_wb_burst_write(void *data, int word_size_bytes, int word_count, unsigne
 
     // Select the appropriate opcode
     switch(current_chain) {
-    case DC_WISHBONE:
+    case DC_AXI:
       if (word_size_bytes == 1) opcode = DBG_WB_CMD_BWRITE8;
       else if(word_size_bytes == 2) opcode = DBG_WB_CMD_BWRITE16;
       else if(word_size_bytes == 4) opcode = DBG_WB_CMD_BWRITE32;
@@ -754,7 +754,7 @@ int adbg_wb_burst_write(void *data, int word_size_bytes, int word_count, unsigne
 
 
    // Now, read the error register and retry/recompute as needed
-   if (current_chain == DC_WISHBONE)
+   if (current_chain == DC_AXI)
      {
        err |= adbg_ctrl_read(DBG_WB_REG_ERROR, err_data, 1);  // First, just get 1 bit...read address only if necessary
        if(err_data[0] & 0x1) {  // Then we have a problem.

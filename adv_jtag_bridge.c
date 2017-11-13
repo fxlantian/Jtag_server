@@ -245,6 +245,7 @@ if(num_devices > 1) {
   
   // Do a sanity test
   cmd = bsdl_get_idcode_cmd(idcodes[target_dev_pos]);
+  printf("httdebug idcode cmd is %d.\n", cmd);
   if(cmd != TAP_CMD_INVALID) {
        uint32_t id_read;
        err |= jtag_get_idcode(cmd, &id_read);
@@ -484,6 +485,9 @@ int main(int argc,  char *argv[]) {
 
   // Start the thread which handle CPU stall/unstall
   start_monitor_thread();
+  
+
+  
 
   rsp_init(serverPort);
 
