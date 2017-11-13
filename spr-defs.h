@@ -29,7 +29,10 @@
 #define DU_BASEADDR   0x1A110000
 #define SPR_PPC       ( DU_BASEADDR + 0x2004 )
 #define SPR_NPC       ( DU_BASEADDR + 0x2000 )
+<<<<<<< HEAD
 #define DBG_BOOT_REG   0x1A106008
+=======
+>>>>>>> a2c617fc5c3f3d3a6dc3e0a2449c8cade008b464
 
 #define DBG_CTRL_REG  ( DU_BASEADDR + 0x0 )
 #define DBG_HIT_REG   ( DU_BASEADDR + 0x4 )

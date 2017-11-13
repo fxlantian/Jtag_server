@@ -730,9 +730,9 @@ rsp_server_request ()
   set_stall_state(1);
   rsp.target_running = 0;  // This prevents an initial exception report to GDB (which it's not expecting)
   rsp.single_step_mode = 0;
-
   dbg_axi_write32(DBG_IE_REG, 0xF7FF);
   dbg_axi_write32(DBG_BOOT_REG, 0x50000000);
+
   /* Enable TRAP exception, but don't otherwise change the SR */
   // TODO Don't manage to access this register while the core is not stopped
   // Not so annoying for Mia, we are always in supervisor mode
